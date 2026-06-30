@@ -6,11 +6,9 @@ puppeteer.use(StealthPlugin());
 const app = express();
 app.use(express.json());
 
-// গ্লোবাল ভেরিয়েবল (ব্রাউজার এবং কুকি ক্যাশ করার জন্য)
 let globalBrowser = null;
 let cachedCookies = null;
 
-// শুরুতে একবার ব্রাউজার লঞ্চ করে রাখা
 const initBrowser = async () => {
     if (!globalBrowser) {
         globalBrowser = await puppeteer.launch({
@@ -31,7 +29,7 @@ app.post('/api/steadfast', async (req, res) => {
     try {
         page = await globalBrowser.newPage();
 
-        // ইমেজ, CSS, ফন্ট ব্লক করা (সুপার ফাস্ট লোডিংয়ের জন্য)
+        // ইমেজ এবং CSS ব্লক করা
         await page.setRequestInterception(true);
         page.on('request', (req) => {
             if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
@@ -41,18 +39,21 @@ app.post('/api/steadfast', async (req, res) => {
             }
         });
 
-        // যদি আগে থেকে ক্যাশ করা কুকি থাকে, তবে লগইন স্কিপ করবে
         if (cachedCookies) {
-            await page.setCookie(...cachedCookies);
+            // BUG FIX: partitionKey মুছে ফেলা হচ্ছে যাতে Puppeteer ক্র্যাশ না করে
+            const cleanCookies = cachedCookies.map(cookie => {
+                const { partitionKey, size, priority, sourceScheme, sourcePort, ...rest } = cookie;
+                return rest;
+            });
+            await page.setCookie(...cleanCookies);
+            
             await page.goto(`https://steadfast.com.bd/user/consignment/getbyphone/${phone}`, { waitUntil: 'domcontentloaded' });
             
-            // সেশন এক্সপায়ার হয়ে লগইন পেজে রিডাইরেক্ট হলে কুকি রিসেট করবে
             if (page.url().includes('/login')) {
                 cachedCookies = null;
             }
         }
 
-        // যদি কুকি না থাকে বা এক্সপায়ার হয়ে যায়, তবে নতুন করে লগইন করবে
         if (!cachedCookies) {
             await page.goto('https://steadfast.com.bd/login', { waitUntil: 'domcontentloaded' });
             await page.type('input[name="email"]', email);
@@ -63,16 +64,14 @@ app.post('/api/steadfast', async (req, res) => {
                 page.click('button[type="submit"]')
             ]);
 
-            // নতুন কুকি সেভ করে রাখা হচ্ছে
             cachedCookies = await page.cookies();
             await page.goto(`https://steadfast.com.bd/user/consignment/getbyphone/${phone}`, { waitUntil: 'domcontentloaded' });
         }
 
-        // ডেটা রিড করা
         const rawData = await page.evaluate(() => document.querySelector("body").innerText);
         const data = JSON.parse(rawData);
 
-        await page.close(); // শুধু ট্যাব ক্লোজ হবে, ব্রাউজার ওপেন থাকবে
+        await page.close();
 
         if(data && data.total_delivered !== undefined) {
             const success = parseInt(data.total_delivered);
@@ -85,7 +84,7 @@ app.post('/api/steadfast', async (req, res) => {
 
     } catch (error) {
         if (page) await page.close();
-        cachedCookies = null; // কোনো এরর হলে কুকি রিসেট
+        cachedCookies = null;
         return res.status(500).json({ error: "Bypass Failed: " + error.message });
     }
 });
