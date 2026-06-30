@@ -1,0 +1,15 @@
+{
+  "name": "steadfast-api-bypasser",
+  "version": "1.0.0",
+  "description": "Cloudflare bypass for Steadfast API",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "puppeteer": "^22.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}
