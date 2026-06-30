@@ -40,13 +40,16 @@ app.post('/api/steadfast', async (req, res) => {
         });
 
         if (cachedCookies) {
-            // BUG FIX: partitionKey মুছে ফেলা হচ্ছে যাতে Puppeteer ক্র্যাশ না করে
-            const cleanCookies = cachedCookies.map(cookie => {
-                const { partitionKey, size, priority, sourceScheme, sourcePort, ...rest } = cookie;
-                return rest;
-            });
-            await page.setCookie(...cleanCookies);
+            // নিখুঁত সলিউশন: শুধুমাত্র মূল ৪টি প্যারামিটার ফিল্টার করে নেওয়া হচ্ছে
+            // এতে partitionKey বা অন্য কোনো ক্র্যাশ করার মতো ডেটা পাস হবে না
+            const cleanCookies = cachedCookies.map(cookie => ({
+                name: cookie.name,
+                value: cookie.value,
+                domain: cookie.domain,
+                path: cookie.path || '/'
+            }));
             
+            await page.setCookie(...cleanCookies);
             await page.goto(`https://steadfast.com.bd/user/consignment/getbyphone/${phone}`, { waitUntil: 'domcontentloaded' });
             
             if (page.url().includes('/login')) {
