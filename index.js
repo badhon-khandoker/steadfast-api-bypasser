@@ -6,8 +6,8 @@ puppeteer.use(StealthPlugin());
 const app = express();
 app.use(express.json());
 
+// ব্রাউজারটি ব্যাকগ্রাউন্ডে একবারই ওপেন হবে
 let globalBrowser = null;
-let cachedCookies = null;
 
 const initBrowser = async () => {
     if (!globalBrowser) {
@@ -29,7 +29,7 @@ app.post('/api/steadfast', async (req, res) => {
     try {
         page = await globalBrowser.newPage();
 
-        // ইমেজ এবং CSS ব্লক করা
+        // ফাস্ট লোডিংয়ের জন্য ইমেজ এবং CSS ব্লক
         await page.setRequestInterception(true);
         page.on('request', (req) => {
             if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
@@ -39,25 +39,15 @@ app.post('/api/steadfast', async (req, res) => {
             }
         });
 
-        if (cachedCookies) {
-            // নিখুঁত সলিউশন: শুধুমাত্র মূল ৪টি প্যারামিটার ফিল্টার করে নেওয়া হচ্ছে
-            // এতে partitionKey বা অন্য কোনো ক্র্যাশ করার মতো ডেটা পাস হবে না
-            const cleanCookies = cachedCookies.map(cookie => ({
-                name: cookie.name,
-                value: cookie.value,
-                domain: cookie.domain,
-                path: cookie.path || '/'
-            }));
-            
-            await page.setCookie(...cleanCookies);
-            await page.goto(`https://steadfast.com.bd/user/consignment/getbyphone/${phone}`, { waitUntil: 'domcontentloaded' });
-            
-            if (page.url().includes('/login')) {
-                cachedCookies = null;
-            }
-        }
+        // স্টেপ ১: ব্রাউজার মেমোরির সেশন চেক করার জন্য সরাসরি ডেটা পেজে হিট
+        await page.goto(`https://steadfast.com.bd/user/consignment/getbyphone/${phone}`, { waitUntil: 'domcontentloaded' });
+        let rawData = await page.evaluate(() => document.body.innerText);
+        
+        let data = null;
+        try { data = JSON.parse(rawData); } catch(e) {}
 
-        if (!cachedCookies) {
+        // স্টেপ ২: যদি ডেটা না থাকে (সেশন নেই), তবে লগইন করবে
+        if (!data || data.total_delivered === undefined) {
             await page.goto('https://steadfast.com.bd/login', { waitUntil: 'domcontentloaded' });
             await page.type('input[name="email"]', email);
             await page.type('input[name="password"]', password);
@@ -67,15 +57,15 @@ app.post('/api/steadfast', async (req, res) => {
                 page.click('button[type="submit"]')
             ]);
 
-            cachedCookies = await page.cookies();
+            // লগইন শেষে আবার ডেটা পেজে হিট
             await page.goto(`https://steadfast.com.bd/user/consignment/getbyphone/${phone}`, { waitUntil: 'domcontentloaded' });
+            rawData = await page.evaluate(() => document.body.innerText);
+            data = JSON.parse(rawData);
         }
 
-        const rawData = await page.evaluate(() => document.querySelector("body").innerText);
-        const data = JSON.parse(rawData);
+        await page.close(); // ট্যাব ক্লোজ
 
-        await page.close();
-
+        // ডেটা ক্যালকুলেশন
         if(data && data.total_delivered !== undefined) {
             const success = parseInt(data.total_delivered);
             const cancelled = parseInt(data.total_cancelled || 0);
@@ -83,14 +73,14 @@ app.post('/api/steadfast', async (req, res) => {
             const ratio = (total > 0) ? Math.round((success / total) * 100) : 100;
             return res.json({ total, ratio, status: "success" });
         }
-        return res.status(400).json({ error: "Invalid Data" });
+        
+        return res.status(400).json({ error: "Invalid Data Format" });
 
     } catch (error) {
         if (page) await page.close();
-        cachedCookies = null;
         return res.status(500).json({ error: "Bypass Failed: " + error.message });
     }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Super Fast Bypasser running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Smart Bypasser running on port ${PORT}`));
